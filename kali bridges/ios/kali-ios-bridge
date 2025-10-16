@@ -1,0 +1,602 @@
+#!/usr/bin/env python3
+"""
+REAL KALI TOOLS iOS INSTALLER - Installs genuine Kali Linux tools on iOS
+Works with iSH Shell, a-Shell, Blink, and other iOS terminal apps
+"""
+
+import os
+import sys
+import subprocess
+import shutil
+from pathlib import Path
+import urllib.request
+import tempfile
+import platform
+import tarfile
+import zipfile
+
+class RealKaliIOSInstaller:
+    def __init__(self):
+        self.environment = self.detect_ios_environment()
+        self.home_dir = Path.home()
+        self.kali_dir = self.home_dir / "kali-tools"
+        self.bin_dir = self.kali_dir / "bin"
+        self.src_dir = self.kali_dir / "src"
+        self.temp_dir = self.home_dir / "tmp" / "kali_install"
+        
+        # REAL Kali tools that can be compiled/installed on iOS
+        self.real_kali_tools = {
+            # Information Gathering - Can be compiled on iOS
+            'nmap': {
+                'type': 'source',
+                'url': 'https://nmap.org/dist/nmap-7.94.tar.bz2',
+                'deps': ['libpcap', 'openssl', 'libssh2'],
+                'build_cmd': './configure --without-zenmap && make && make install',
+                'test_cmd': 'nmap --version'
+            },
+            'masscan': {
+                'type': 'source', 
+                'url': 'https://github.com/robertdavidgraham/masscan/archive/refs/heads/master.zip',
+                'deps': ['libpcap'],
+                'build_cmd': 'make && cp bin/masscan /usr/local/bin/',
+                'test_cmd': 'masscan --version'
+            },
+            'theharvester': {
+                'type': 'python',
+                'pip': 'theharvester',
+                'test_cmd': 'theHarvester --help'
+            },
+            'sublist3r': {
+                'type': 'python',
+                'pip': 'sublist3r', 
+                'test_cmd': 'sublist3r --help'
+            },
+            'dnsrecon': {
+                'type': 'python',
+                'pip': 'dnsrecon',
+                'test_cmd': 'dnsrecon --help'
+            },
+            
+            # Vulnerability Analysis
+            'sqlmap': {
+                'type': 'python',
+                'pip': 'sqlmap',
+                'test_cmd': 'sqlmap --version'
+            },
+            'nikto': {
+                'type': 'perl',
+                'url': 'https://github.com/sullo/nikto/archive/refs/heads/master.zip',
+                'install_cmd': 'cd program && perl nikto.pl --help',
+                'test_cmd': 'perl nikto.pl -Version'
+            },
+            
+            # Web Application Tools
+            'dirb': {
+                'type': 'source',
+                'url': 'https://downloads.sourceforge.net/project/dirb/dirb/2.22/dirb222.tar.gz',
+                'deps': ['curl'],
+                'build_cmd': './configure && make && make install',
+                'test_cmd': 'dirb --help'
+            },
+            'whatweb': {
+                'type': 'ruby',
+                'url': 'https://github.com/urbanadventurer/WhatWeb/archive/refs/heads/master.zip',
+                'test_cmd': 'ruby whatweb --version'
+            },
+            
+            # Password Attacks
+            'john': {
+                'type': 'source',
+                'url': 'https://github.com/openwall/john/archive/refs/heads/bleeding-jumbo.zip',
+                'deps': ['openssl', 'zlib'],
+                'build_cmd': 'cd src && ./configure && make -j4',
+                'test_cmd': './run/john --help'
+            },
+            'hashcat': {
+                'type': 'source',
+                'url': 'https://github.com/hashcat/hashcat/archive/refs/heads/master.zip',
+                'deps': ['openssl'],
+                'build_cmd': 'make && make install',
+                'test_cmd': 'hashcat --version'
+            },
+            'hydra': {
+                'type': 'source',
+                'url': 'https://github.com/vanhauser-thc/thc-hydra/archive/refs/heads/master.zip',
+                'deps': ['openssl', 'libssh', 'libidn'],
+                'build_cmd': './configure && make && make install',
+                'test_cmd': 'hydra --version'
+            },
+            
+            # Wireless Tools (limited on iOS)
+            'aircrack-ng': {
+                'type': 'source',
+                'url': 'https://download.aircrack-ng.org/aircrack-ng-1.7.tar.gz',
+                'deps': ['openssl', 'sqlite'],
+                'build_cmd': './configure && make && make install',
+                'test_cmd': 'aircrack-ng --version'
+            },
+            
+            # Sniffing & Spoofing
+            'tcpdump': {
+                'type': 'source',
+                'url': 'https://www.tcpdump.org/release/tcpdump-4.99.4.tar.gz',
+                'deps': ['libpcap'],
+                'build_cmd': './configure && make && make install',
+                'test_cmd': 'tcpdump --version'
+            },
+            
+            # Forensics
+            'binwalk': {
+                'type': 'python',
+                'pip': 'binwalk',
+                'test_cmd': 'binwalk --help'
+            },
+            'foremost': {
+                'type': 'source',
+                'url': 'https://github.com/korczis/foremost/archive/refs/heads/master.zip',
+                'build_cmd': 'make && make install',
+                'test_cmd': 'foremost -h'
+            },
+            
+            # iOS Specific Tools
+            'ios-deploy': {
+                'type': 'source',
+                'url': 'https://github.com/ios-control/ios-deploy/archive/refs/heads/master.zip',
+                'build_cmd': 'make && make install',
+                'test_cmd': 'ios-deploy --version'
+            },
+            'libimobiledevice': {
+                'type': 'source',
+                'url': 'https://github.com/libimobiledevice/libimobiledevice/archive/refs/heads/master.zip',
+                'deps': ['openssl', 'libusb'],
+                'build_cmd': './autogen.sh && make && make install',
+                'test_cmd': 'ideviceinfo --version'
+            },
+            
+            # Essential Utilities
+            'curl': {
+                'type': 'source',
+                'url': 'https://curl.se/download/curl-8.2.1.tar.gz',
+                'deps': ['openssl', 'zlib'],
+                'build_cmd': './configure --with-openssl && make && make install',
+                'test_cmd': 'curl --version'
+            },
+            'wget': {
+                'type': 'source',
+                'url': 'https://ftp.gnu.org/gnu/wget/wget-1.21.3.tar.gz',
+                'deps': ['openssl'],
+                'build_cmd': './configure --with-ssl=openssl && make && make install',
+                'test_cmd': 'wget --version'
+            }
+        }
+        
+        self.setup_directories()
+
+    def detect_ios_environment(self):
+        """Detect which iOS environment we're running in"""
+        env_indicators = {
+            'iSH': ['/etc/alpine-release', '/bin/busybox'],
+            'a-Shell': ['/usr/bin/ash', '/usr/bin/fileproviderctl'],
+            'Blink': ['/usr/bin/blink', '/var/mobile/blink'],
+            'Pythonista': ['/var/mobile/Containers/Shared/AppGroup'],
+            'StaSh': ['/var/mobile/stash']
+        }
+        
+        for env_name, paths in env_indicators.items():
+            for path in paths:
+                if Path(path).exists():
+                    print(f"📱 Detected environment: {env_name}")
+                    return env_name
+        
+        print("📱 Unknown iOS environment - using generic setup")
+        return "Generic"
+
+    def setup_directories(self):
+        """Create Kali tools directory structure"""
+        directories = [self.kali_dir, self.bin_dir, self.src_dir, self.temp_dir, 
+                      self.kali_dir / "config", self.kali_dir / "output"]
+        for directory in directories:
+            directory.mkdir(parents=True, exist_ok=True)
+        print(f"📁 Kali tools directory: {self.kali_dir}")
+
+    def run_command(self, command, shell=True):
+        """Run system command with error handling"""
+        try:
+            if shell:
+                result = subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
+            else:
+                result = subprocess.run(command, capture_output=True, text=True, check=True)
+            return True, result.stdout
+        except subprocess.CalledProcessError as e:
+            return False, e.stderr
+
+    def install_dependencies(self):
+        """Install build dependencies based on environment"""
+        print("📦 Installing build dependencies...")
+        
+        if self.environment == "iSH":
+            # iSH uses Alpine Linux packages
+            commands = [
+                "apk update",
+                "apk add build-base git wget curl python3 python3-dev py3-pip",
+                "apk add libpcap-dev openssl-dev libssh2-dev zlib-dev",
+                "apk add perl ruby ruby-dev sqlite-dev",
+                "pip3 install --upgrade pip"
+            ]
+        elif self.environment == "a-Shell":
+            # a-Shell has limited package management
+            commands = [
+                "pkg update",
+                "pkg install python3 git wget curl make clang",
+                "pip3 install --upgrade pip"
+            ]
+        else:
+            # Generic environment
+            commands = [
+                "python3 -m ensurepip",
+                "pip3 install --upgrade pip"
+            ]
+        
+        for cmd in commands:
+            success, output = self.run_command(cmd)
+            if success:
+                print(f"✅ {cmd}")
+            else:
+                print(f"⚠️ Failed: {cmd}")
+        
+        return True
+
+    def download_file(self, url, destination):
+        """Download file from URL"""
+        try:
+            print(f"📥 Downloading {url}...")
+            urllib.request.urlretrieve(url, destination)
+            return True
+        except Exception as e:
+            print(f"❌ Download failed: {e}")
+            return False
+
+    def extract_archive(self, archive_path, extract_to):
+        """Extract various archive formats"""
+        try:
+            if archive_path.suffix in ['.gz', '.bz2', '.xz']:
+                # Tar archive
+                with tarfile.open(archive_path, 'r:*') as tar:
+                    tar.extractall(extract_to)
+            elif archive_path.suffix == '.zip':
+                # Zip archive
+                with zipfile.ZipFile(archive_path, 'r') as zip_ref:
+                    zip_ref.extractall(extract_to)
+            else:
+                print(f"❌ Unsupported archive format: {archive_path.suffix}")
+                return False
+            return True
+        except Exception as e:
+            print(f"❌ Extraction failed: {e}")
+            return False
+
+    def install_via_pip(self, package_name):
+        """Install Python package via pip"""
+        try:
+            print(f"🐍 Installing {package_name} via pip...")
+            subprocess.run([sys.executable, "-m", "pip", "install", package_name], check=True)
+            print(f"✅ {package_name} installed via pip")
+            return True
+        except subprocess.CalledProcessError:
+            print(f"❌ Failed to install {package_name} via pip")
+            return False
+
+    def compile_from_source(self, tool_name, tool_info):
+        """Compile and install tool from source"""
+        print(f"🔨 Compiling {tool_name} from source...")
+        
+        # Download source
+        download_path = self.temp_dir / f"{tool_name}_source"
+        if not self.download_file(tool_info['url'], download_path):
+            return False
+        
+        # Extract source
+        extract_dir = self.src_dir / tool_name
+        extract_dir.mkdir(exist_ok=True)
+        
+        if not self.extract_archive(download_path, extract_dir):
+            return False
+        
+        # Find the actual source directory
+        source_dir = None
+        for item in extract_dir.iterdir():
+            if item.is_dir():
+                source_dir = item
+                break
+        
+        if not source_dir:
+            print("❌ Could not find source directory")
+            return False
+        
+        # Build and install
+        os.chdir(source_dir)
+        
+        try:
+            # Run build commands
+            build_cmd = tool_info.get('build_cmd', './configure && make && make install')
+            for cmd in build_cmd.split('&&'):
+                cmd = cmd.strip()
+                success, output = self.run_command(cmd)
+                if not success:
+                    print(f"❌ Build failed at: {cmd}")
+                    return False
+            
+            print(f"✅ {tool_name} compiled and installed successfully")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Compilation failed: {e}")
+            return False
+        finally:
+            os.chdir(self.home_dir)
+
+    def install_nmap(self):
+        """Specialized NMAP installation for iOS"""
+        print("🔧 Installing NMAP (this may take a while)...")
+        return self.compile_from_source('nmap', self.real_kali_tools['nmap'])
+
+    def install_sqlmap(self):
+        """Install SQLMap"""
+        print("💉 Installing SQLMap...")
+        return self.install_via_pip('sqlmap')
+
+    def install_theharvester(self):
+        """Install TheHarvester"""
+        print("🌐 Installing TheHarvester...")
+        return self.install_via_pip('theharvester')
+
+    def install_aircrack(self):
+        """Install Aircrack-ng (limited functionality on iOS)"""
+        print("📶 Installing Aircrack-ng (limited on iOS)...")
+        return self.compile_from_source('aircrack-ng', self.real_kali_tools['aircrack-ng'])
+
+    def install_ios_tools(self):
+        """Install iOS-specific tools"""
+        print("📱 Installing iOS-specific tools...")
+        tools = ['ios-deploy', 'libimobiledevice']
+        success_count = 0
+        
+        for tool in tools:
+            if tool in self.real_kali_tools:
+                if self.compile_from_source(tool, self.real_kali_tools[tool]):
+                    success_count += 1
+        
+        print(f"✅ Installed {success_count}/{len(tools)} iOS tools")
+        return success_count
+
+    def install_tool(self, tool_name):
+        """Install a specific Kali tool"""
+        if tool_name not in self.real_kali_tools:
+            print(f"❌ Tool {tool_name} not found")
+            return False
+        
+        tool_info = self.real_kali_tools[tool_name]
+        print(f"\n🚀 Installing {tool_name}...")
+        
+        # Special handling for common tools
+        special_installers = {
+            'nmap': self.install_nmap,
+            'sqlmap': self.install_sqlmap,
+            'theharvester': self.install_theharvester,
+            'aircrack-ng': self.install_aircrack
+        }
+        
+        if tool_name in special_installers:
+            return special_installers[tool_name]()
+        
+        # Generic installation based on type
+        if tool_info['type'] == 'python':
+            return self.install_via_pip(tool_info['pip'])
+        elif tool_info['type'] == 'source':
+            return self.compile_from_source(tool_name, tool_info)
+        else:
+            print(f"❌ Unknown installation type for {tool_name}")
+            return False
+
+    def install_tool_category(self, category_name):
+        """Install tools by category"""
+        categories = {
+            'info_gathering': ['nmap', 'theharvester', 'sublist3r', 'dnsrecon'],
+            'web_apps': ['sqlmap', 'nikto', 'dirb', 'whatweb'],
+            'password_attacks': ['john', 'hashcat', 'hydra'],
+            'ios_tools': ['ios-deploy', 'libimobiledevice'],
+            'networking': ['tcpdump', 'curl', 'wget']
+        }
+        
+        if category_name not in categories:
+            print(f"❌ Category {category_name} not found")
+            return False
+        
+        print(f"\n📦 Installing {category_name} tools...")
+        tools = categories[category_name]
+        success_count = 0
+        
+        for tool in tools:
+            if self.install_tool(tool):
+                success_count += 1
+        
+        print(f"✅ Installed {success_count}/{len(tools)} tools from {category_name}")
+        return success_count
+
+    def verify_installation(self, tool_name):
+        """Verify if tool is installed and working"""
+        if tool_name not in self.real_kali_tools:
+            print(f"❌ Tool {tool_name} not found")
+            return False
+        
+        tool_info = self.real_kali_tools[tool_name]
+        test_cmd = tool_info.get('test_cmd', f"{tool_name} --version")
+        
+        try:
+            subprocess.run(test_cmd.split(), capture_output=True, check=True)
+            print(f"✅ {tool_name} is installed and working!")
+            return True
+        except:
+            print(f"❌ {tool_name} is not working properly")
+            return False
+
+    def setup_environment(self):
+        """Setup the iOS environment for Kali tools"""
+        print("🛠️ Setting up Kali tools environment on iOS...")
+        
+        # Install dependencies
+        self.install_dependencies()
+        
+        # Add bin to PATH
+        self.add_to_path()
+        
+        # Create utility scripts
+        self.create_ios_scripts()
+        
+        print("✅ iOS Kali environment setup completed!")
+        return True
+
+    def add_to_path(self):
+        """Add kali-tools/bin to PATH"""
+        shell_rc_files = [
+            self.home_dir / ".bashrc",
+            self.home_dir / ".zshrc",
+            self.home_dir / ".profile"
+        ]
+        
+        path_line = f'\nexport PATH="$HOME/kali-tools/bin:$PATH"\n'
+        
+        for rc_file in shell_rc_files:
+            if rc_file.exists():
+                with open(rc_file, 'a') as f:
+                    f.write(path_line)
+                print(f"✅ Added to {rc_file}")
+        
+        # Add to current session
+        os.environ["PATH"] = f"{self.bin_dir}:{os.environ['PATH']}"
+
+    def create_ios_scripts(self):
+        """Create iOS-specific utility scripts"""
+        scripts = {
+            'ios-scan': '''#!/bin/bash
+echo "📱 iOS Network Scanner"
+echo "Quick network discovery..."
+nmap -sn 192.168.1.0/24
+''',
+            'ios-webscan': '''#!/bin/bash
+echo "🌐 iOS Web Reconnaissance"
+if [ -z "$1" ]; then
+    echo "Usage: ios-webscan target.com"
+    exit 1
+fi
+echo "Scanning: $1"
+theHarvester -d "$1" -b google
+sublist3r -d "$1"
+''',
+            'ios-deviceinfo': '''#!/bin/bash
+echo "📲 iOS Device Information"
+if command -v ideviceinfo &> /dev/null; then
+    ideviceinfo
+else
+    echo "libimobiledevice not installed"
+fi
+'''
+        }
+        
+        for script_name, content in scripts.items():
+            script_path = self.bin_dir / script_name
+            with open(script_path, 'w') as f:
+                f.write(content)
+            script_path.chmod(0o755)
+            print(f"📝 Created: {script_path}")
+
+    def show_environment_info(self):
+        """Show iOS environment information"""
+        print(f"\n📱 iOS ENVIRONMENT: {self.environment}")
+        print(f"🏠 Home Directory: {self.home_dir}")
+        print(f"🔧 Kali Tools: {self.kali_dir}")
+        
+        # Show available tools
+        print("\n🛠️ AVAILABLE TOOLS ON iOS:")
+        for tool, info in self.real_kali_tools.items():
+            status = "✅" if self.verify_installation(tool) else "❌"
+            print(f"  {status} {tool} ({info['type']})")
+
+    def show_usage_examples(self):
+        """Show iOS-specific usage examples"""
+        examples = {
+            'nmap': 'nmap -sT 192.168.1.1',
+            'sqlmap': 'sqlmap -u "http://test.com/page?id=1" --batch',
+            'theharvester': 'theHarvester -d example.com -b google',
+            'tcpdump': 'tcpdump -i any -c 10',
+            'ios-deploy': 'ios-deploy --list'
+        }
+        
+        print("\n🎯 iOS KALI TOOL USAGE:")
+        for tool, example in examples.items():
+            print(f"🔧 {tool}: {example}")
+
+    def interactive_menu(self):
+        """Interactive installation menu"""
+        while True:
+            print("\n" + "=" * 60)
+            print("🛡️  REAL KALI TOOLS - iOS INSTALLER")
+            print("=" * 60)
+            print("1. Show environment info")
+            print("2. Setup environment (RUN THIS FIRST)")
+            print("3. Install specific Kali tool")
+            print("4. Install tools by category")
+            print("5. Install iOS-specific tools")
+            print("6. Install popular tools bundle")
+            print("7. Verify tool installation")
+            print("8. Show usage examples")
+            print("9. Exit")
+            print("=" * 60)
+            
+            choice = input("🎯 Enter your choice (1-9): ").strip()
+            
+            if choice == '1':
+                self.show_environment_info()
+            elif choice == '2':
+                self.setup_environment()
+            elif choice == '3':
+                tool_name = input("🔧 Enter Kali tool name: ").strip()
+                self.install_tool(tool_name)
+            elif choice == '4':
+                print("\n📁 Available categories:")
+                print("  info_gathering - Network reconnaissance")
+                print("  web_apps - Web application testing")
+                print("  password_attacks - Password cracking")
+                print("  ios_tools - iOS-specific tools")
+                print("  networking - Network utilities")
+                category = input("📁 Enter category: ").strip()
+                self.install_tool_category(category)
+            elif choice == '5':
+                self.install_ios_tools()
+            elif choice == '6':
+                popular_tools = ['nmap', 'sqlmap', 'theharvester', 'tcpdump', 'curl']
+                print("🎯 Installing popular tools...")
+                for tool in popular_tools:
+                    self.install_tool(tool)
+            elif choice == '7':
+                tool_name = input("🔍 Enter tool name to verify: ").strip()
+                self.verify_installation(tool_name)
+            elif choice == '8':
+                self.show_usage_examples()
+            elif choice == '9':
+                print("👋 Goodbye! Restart your terminal app to use Kali tools!")
+                break
+            else:
+                print("❌ Invalid choice")
+
+def main():
+    """Main function"""
+    print("🚀 REAL KALI LINUX TOOLS - iOS INSTALLER")
+    print("📱 Installing genuine Kali tools on iOS...")
+    print("⚡ This compiles REAL tools from source for iOS!")
+    
+    installer = RealKaliIOSInstaller()
+    installer.interactive_menu()
+
+if __name__ == "__main__":
+    main()

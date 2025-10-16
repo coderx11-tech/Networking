@@ -1,0 +1,639 @@
+#!/usr/bin/env python3
+"""
+KALI TOOLS ANDROID INSTALLER - Installs Kali Tools on Android via Termux
+Works on Android phones and tablets
+"""
+
+import os
+import sys
+import subprocess
+import shutil
+from pathlib import Path
+import platform
+import urllib.request
+import zipfile
+import tempfile
+
+class KaliAndroidInstaller:
+    def __init__(self):
+        self.termux_prefix = "/data/data/com.termux/files/usr"
+        self.home_dir = Path.home()
+        self.kali_dir = self.home_dir / "kali-tools"
+        self.bin_dir = self.kali_dir / "bin"
+        self.temp_dir = Path("/data/data/com.termux/files/usr/tmp/kali_install")
+        
+        # Android-specific Kali tools (optimized for ARM)
+        self.kali_tools = {
+            'information_gathering': {
+                'nmap': {
+                    'pkg': 'nmap',
+                    'test_cmd': 'nmap --version',
+                    'usage': 'nmap -sV 192.168.1.1'
+                },
+                'dnsutils': {
+                    'pkg': 'dnsutils',
+                    'test_cmd': 'dig -v',
+                    'usage': 'dig example.com'
+                },
+                'sublist3r': {
+                    'pip': 'sublist3r',
+                    'test_cmd': 'sublist3r --help',
+                    'usage': 'sublist3r -d example.com'
+                },
+                'theharvester': {
+                    'pip': 'theharvester',
+                    'test_cmd': 'theHarvester --help',
+                    'usage': 'theHarvester -d example.com -b google'
+                },
+                'amass': {
+                    'pkg': 'amass',
+                    'test_cmd': 'amass --version',
+                    'usage': 'amass enum -d example.com'
+                },
+                'whois': {
+                    'pkg': 'whois',
+                    'test_cmd': 'whois --version',
+                    'usage': 'whois example.com'
+                }
+            },
+            'vulnerability_analysis': {
+                'sqlmap': {
+                    'pip': 'sqlmap',
+                    'test_cmd': 'sqlmap --version',
+                    'usage': 'sqlmap -u "http://test.com/page?id=1" --batch'
+                },
+                'nikto': {
+                    'pkg': 'nikto',
+                    'test_cmd': 'nikto -Version',
+                    'usage': 'nikto -h http://target.com'
+                },
+                'nuclei': {
+                    'pkg': 'nuclei',
+                    'test_cmd': 'nuclei -version',
+                    'usage': 'nuclei -u http://target.com'
+                },
+                'wapiti': {
+                    'pip': 'wapiti3',
+                    'test_cmd': 'wapiti --help',
+                    'usage': 'wapiti -u http://target.com'
+                }
+            },
+            'web_applications': {
+                'dirb': {
+                    'pkg': 'dirb',
+                    'test_cmd': 'dirb --help',
+                    'usage': 'dirb http://target.com'
+                },
+                'gobuster': {
+                    'pkg': 'gobuster',
+                    'test_cmd': 'gobuster --help',
+                    'usage': 'gobuster dir -u http://target.com -w wordlist.txt'
+                },
+                'whatweb': {
+                    'pkg': 'whatweb',
+                    'test_cmd': 'whatweb --version',
+                    'usage': 'whatweb target.com'
+                },
+                'wpscan': {
+                    'pkg': 'wpscan',
+                    'test_cmd': 'wpscan --version',
+                    'usage': 'wpscan --url http://target.com'
+                },
+                'httrack': {
+                    'pkg': 'httrack',
+                    'test_cmd': 'httrack --version',
+                    'usage': 'httrack http://target.com'
+                }
+            },
+            'password_attacks': {
+                'john': {
+                    'pkg': 'john',
+                    'test_cmd': 'john --help',
+                    'usage': 'john --wordlist=passwords.txt hashes.txt'
+                },
+                'hashcat': {
+                    'pkg': 'hashcat',
+                    'test_cmd': 'hashcat --version',
+                    'usage': 'hashcat -m 0 -a 0 hash.txt wordlist.txt'
+                },
+                'hydra': {
+                    'pkg': 'hydra',
+                    'test_cmd': 'hydra --version',
+                    'usage': 'hydra -l admin -P passwords.txt ssh://192.168.1.1'
+                },
+                'crunch': {
+                    'pkg': 'crunch',
+                    'test_cmd': 'crunch --help',
+                    'usage': 'crunch 6 8 123456 -o wordlist.txt'
+                },
+                'wordlists': {
+                    'pkg': 'wordlists',
+                    'test_cmd': 'ls /data/data/com.termux/files/usr/share/wordlists',
+                    'usage': 'Common wordlists for brute forcing'
+                }
+            },
+            'wireless_tools': {
+                'aircrack-ng': {
+                    'pkg': 'aircrack-ng',
+                    'test_cmd': 'aircrack-ng --version',
+                    'usage': 'aircrack-ng -w wordlist.txt capture.cap'
+                },
+                'kismet': {
+                    'pkg': 'kismet',
+                    'test_cmd': 'kismet --version',
+                    'usage': 'kismet (requires compatible WiFi adapter)'
+                },
+                'reaver': {
+                    'pkg': 'reaver',
+                    'test_cmd': 'reaver --help',
+                    'usage': 'reaver -i wlan0 -b AA:BB:CC:DD:EE:FF'
+                },
+                'wifi-analyzer': {
+                    'pkg': 'wifite2',
+                    'pip': 'wifite2',
+                    'test_cmd': 'wifite --help',
+                    'usage': 'wifite (automated wireless attacks)'
+                }
+            },
+            'sniffing_spoofing': {
+                'tcpdump': {
+                    'pkg': 'tcpdump',
+                    'test_cmd': 'tcpdump --version',
+                    'usage': 'tcpdump -i any -w capture.pcap'
+                },
+                'tshark': {
+                    'pkg': 'tshark',
+                    'test_cmd': 'tshark --version',
+                    'usage': 'tshark -i any -f "tcp port 80"'
+                },
+                'ettercap': {
+                    'pkg': 'ettercap',
+                    'test_cmd': 'ettercap --version',
+                    'usage': 'ettercap -T -i wlan0 -M arp /192.168.1.1// /192.168.1.2//'
+                },
+                'driftnet': {
+                    'pkg': 'driftnet',
+                    'test_cmd': 'driftnet --help',
+                    'usage': 'driftnet -i wlan0'
+                }
+            },
+            'exploitation_tools': {
+                'metasploit': {
+                    'pkg': 'metasploit',
+                    'test_cmd': 'msfconsole --version',
+                    'usage': 'msfconsole'
+                },
+                'commix': {
+                    'pip': 'commix',
+                    'test_cmd': 'commix --version',
+                    'usage': 'commix -u "http://target.com/vuln.php?id=1"'
+                },
+                'searchsploit': {
+                    'pkg': 'exploitdb',
+                    'test_cmd': 'searchsploit --help',
+                    'usage': 'searchsploit apache 2.4'
+                }
+            },
+            'forensics': {
+                'binwalk': {
+                    'pkg': 'binwalk',
+                    'test_cmd': 'binwalk --help',
+                    'usage': 'binwalk firmware.bin'
+                },
+                'foremost': {
+                    'pkg': 'foremost',
+                    'test_cmd': 'foremost -h',
+                    'usage': 'foremost -i disk.img -o output'
+                },
+                'volatility3': {
+                    'pip': 'volatility3',
+                    'test_cmd': 'vol --help',
+                    'usage': 'vol -f memory.dmp windows.info'
+                },
+                'strings': {
+                    'pkg': 'binutils',
+                    'test_cmd': 'strings --version',
+                    'usage': 'strings binary.exe | grep password'
+                }
+            },
+            'android_specific': {
+                'termux-api': {
+                    'pkg': 'termux-api',
+                    'test_cmd': 'termux-battery-status',
+                    'usage': 'Access Android APIs from Termux'
+                },
+                'adb': {
+                    'pkg': 'android-tools',
+                    'test_cmd': 'adb version',
+                    'usage': 'adb devices (for Android testing)'
+                },
+                'apktool': {
+                    'pkg': 'apktool',
+                    'test_cmd': 'apktool --version',
+                    'usage': 'apktool d app.apk'
+                },
+                'jadx': {
+                    'pkg': 'jadx',
+                    'test_cmd': 'jadx --version',
+                    'usage': 'jadx app.apk'
+                }
+            }
+        }
+        
+        self.setup_directories()
+
+    def setup_directories(self):
+        """Create Kali tools directory structure"""
+        directories = [self.kali_dir, self.bin_dir, self.kali_dir / "wordlists", self.kali_dir / "output"]
+        for directory in directories:
+            directory.mkdir(parents=True, exist_ok=True)
+        print(f"📁 Kali tools directory: {self.kali_dir}")
+
+    def run_command(self, command, shell=False):
+        """Run system command with error handling"""
+        try:
+            if shell:
+                result = subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
+            else:
+                result = subprocess.run(command, capture_output=True, text=True, check=True)
+            return True, result.stdout
+        except subprocess.CalledProcessError as e:
+            return False, e.stderr
+
+    def check_termux(self):
+        """Verify we're running in Termux"""
+        if not Path(self.termux_prefix).exists():
+            print("❌ This script must be run in Termux!")
+            print("📥 Install Termux from: https://f-droid.org/en/packages/com.termux/")
+            return False
+        return True
+
+    def update_packages(self):
+        """Update Termux packages"""
+        print("🔄 Updating Termux packages...")
+        commands = [
+            ["pkg", "update", "-y"],
+            ["pkg", "upgrade", "-y"]
+        ]
+        
+        for cmd in commands:
+            success, output = self.run_command(cmd)
+            if not success:
+                print(f"❌ Failed to update packages: {output}")
+                return False
+        
+        print("✅ Packages updated successfully")
+        return True
+
+    def install_via_pkg(self, package_name):
+        """Install package via pkg"""
+        try:
+            print(f"📦 Installing {package_name} via pkg...")
+            subprocess.run(["pkg", "install", "-y", package_name], check=True)
+            return True
+        except subprocess.CalledProcessError:
+            print(f"❌ Failed to install {package_name} via pkg")
+            return False
+
+    def install_via_pip(self, package_name):
+        """Install Python package via pip"""
+        try:
+            print(f"🐍 Installing {package_name} via pip...")
+            subprocess.run(["pip", "install", "--user", package_name], check=True)
+            return True
+        except subprocess.CalledProcessError:
+            print(f"❌ Failed to install {package_name} via pip")
+            return False
+
+    def install_nmap(self):
+        """Specialized NMAP installation"""
+        print("🔧 Installing NMAP...")
+        return self.install_via_pkg("nmap")
+
+    def install_sqlmap(self):
+        """Specialized SQLMap installation"""
+        print("💉 Installing SQLMap...")
+        return self.install_via_pip("sqlmap")
+
+    def install_metasploit(self):
+        """Specialized Metasploit installation"""
+        print("💣 Installing Metasploit Framework...")
+        # Metasploit on Android requires specific setup
+        if self.install_via_pkg("metasploit"):
+            print("✅ Metasploit installed - run 'msfconsole' to start")
+            return True
+        return False
+
+    def install_aircrack(self):
+        """Specialized Aircrack-ng installation"""
+        print("📶 Installing Aircrack-ng...")
+        return self.install_via_pkg("aircrack-ng")
+
+    def install_android_tools(self):
+        """Install Android-specific tools"""
+        print("📱 Installing Android penetration testing tools...")
+        tools = ['apktool', 'jadx', 'android-tools']
+        success_count = 0
+        
+        for tool in tools:
+            if self.install_via_pkg(tool):
+                success_count += 1
+        
+        print(f"✅ Installed {success_count}/{len(tools)} Android tools")
+        return success_count
+
+    def install_tool(self, tool_name):
+        """Install a specific tool"""
+        print(f"\n🚀 Installing {tool_name}...")
+        
+        # Special handling for common tools
+        special_installers = {
+            'nmap': self.install_nmap,
+            'sqlmap': self.install_sqlmap,
+            'metasploit': self.install_metasploit,
+            'aircrack-ng': self.install_aircrack
+        }
+        
+        if tool_name in special_installers:
+            return special_installers[tool_name]()
+        
+        # Find tool in database
+        tool_info = self.find_tool_info(tool_name)
+        if not tool_info:
+            print(f"❌ Tool {tool_name} not found in database")
+            return False
+        
+        # Try different installation methods
+        if 'pkg' in tool_info:
+            return self.install_via_pkg(tool_info['pkg'])
+        elif 'pip' in tool_info:
+            return self.install_via_pip(tool_info['pip'])
+        else:
+            print(f"❌ No installation method for {tool_name}")
+            return False
+
+    def find_tool_info(self, tool_name):
+        """Find tool information in database"""
+        for category, tools in self.kali_tools.items():
+            if tool_name in tools:
+                return tools[tool_name]
+        return None
+
+    def install_category(self, category_name):
+        """Install all tools in a category"""
+        if category_name not in self.kali_tools:
+            print(f"❌ Category {category_name} not found")
+            return False
+        
+        print(f"\n📦 Installing {category_name} tools...")
+        tools = self.kali_tools[category_name]
+        success_count = 0
+        
+        for tool_name in tools:
+            if self.install_tool(tool_name):
+                success_count += 1
+        
+        print(f"✅ Installed {success_count}/{len(tools)} tools from {category_name}")
+        return success_count
+
+    def install_popular_tools(self):
+        """Install most popular Kali tools for Android"""
+        popular_tools = ['nmap', 'sqlmap', 'metasploit', 'aircrack-ng', 'theharvester', 'sublist3r', 'hydra']
+        print("\n🎯 Installing popular Kali tools for Android...")
+        
+        success_count = 0
+        for tool in popular_tools:
+            if self.install_tool(tool):
+                success_count += 1
+        
+        print(f"✅ Installed {success_count}/{len(popular_tools)} popular tools")
+        return success_count
+
+    def verify_installation(self, tool_name):
+        """Verify if tool is installed and working"""
+        tool_info = self.find_tool_info(tool_name)
+        if not tool_info:
+            print(f"❌ Tool {tool_name} not found")
+            return False
+        
+        test_command = tool_info.get('test_cmd', f"{tool_name} --version")
+        
+        try:
+            subprocess.run(test_command.split(), capture_output=True, check=True)
+            print(f"✅ {tool_name} is installed and working!")
+            return True
+        except:
+            print(f"❌ {tool_name} is not working properly")
+            return False
+
+    def show_usage_examples(self):
+        """Show Android-specific usage examples"""
+        examples = {
+            'nmap': 'nmap -sV 192.168.1.1',
+            'sqlmap': 'sqlmap -u "http://test.com/page?id=1" --batch',
+            'metasploit': 'msfconsole',
+            'theharvester': 'theHarvester -d example.com -b google',
+            'sublist3r': 'sublist3r -d example.com',
+            'aircrack-ng': 'aircrack-ng -w wordlist.txt capture.cap',
+            'hydra': 'hydra -l admin -P passwords.txt ssh://192.168.1.1',
+            'tcpdump': 'tcpdump -i wlan0 -w capture.pcap',
+            'apktool': 'apktool d app.apk',
+            'adb': 'adb devices'
+        }
+        
+        print("\n📱 ANDROID USAGE EXAMPLES:")
+        print("=" * 50)
+        for tool, example in examples.items():
+            print(f"🔧 {tool}:")
+            print(f"   {example}")
+        print("=" * 50)
+        print("\n💡 Tips:")
+        print("• Use 'termux-setup-storage' to access phone storage")
+        print("• Some tools require root access")
+        print("• Wireless tools need compatible hardware")
+
+    def setup_storage(self):
+        """Setup Termux storage access"""
+        print("💾 Setting up storage access...")
+        success, output = self.run_command("termux-setup-storage")
+        if success:
+            print("✅ Storage access configured")
+            print("📁 Your files are in: /storage/emulated/0/")
+        else:
+            print("❌ Failed to setup storage")
+        return success
+
+    def install_essential_dependencies(self):
+        """Install essential dependencies"""
+        print("📦 Installing essential dependencies...")
+        essential_packages = [
+            "python", "python-pip", "git", "wget", "curl", 
+            "proot", "tar", "unzip", "vim", "nano"
+        ]
+        
+        success_count = 0
+        for pkg in essential_packages:
+            if self.install_via_pkg(pkg):
+                success_count += 1
+        
+        print(f"✅ Installed {success_count}/{len(essential_packages)} essential packages")
+        return success_count
+
+    def create_quick_scripts(self):
+        """Create quick launch scripts"""
+        scripts = {
+            'kali-scan': '''#!/bin/bash
+echo "🔍 Quick Network Scanner"
+nmap -sP 192.168.1.0/24
+''',
+            'kali-webscan': '''#!/bin/bash
+echo "🌐 Quick Web Scanner"
+echo "Usage: kali-webscan target.com"
+if [ ! -z "$1" ]; then
+    theHarvester -d $1 -b google
+    sublist3r -d $1
+fi
+''',
+            'kali-wifi': '''#!/bin/bash
+echo "📶 WiFi Tools Menu"
+echo "1. Scan networks: airodump-ng wlan0"
+echo "2. Capture handshake: airodump-ng -c 1 --bssid AA:BB:CC:DD:EE:FF -w capture wlan0"
+echo "3. Crack WPA: aircrack-ng -w wordlist.txt capture.cap"
+'''
+        }
+        
+        for script_name, content in scripts.items():
+            script_path = self.bin_dir / script_name
+            with open(script_path, 'w') as f:
+                f.write(content)
+            script_path.chmod(0o755)
+        
+        print("✅ Created quick launch scripts in kali-tools/bin/")
+
+    def setup_environment(self):
+        """Setup the complete Android environment"""
+        print("🛠️ Setting up Kali tools environment on Android...")
+        
+        # Check if we're in Termux
+        if not self.check_termux():
+            return False
+        
+        # Update packages
+        if not self.update_packages():
+            print("⚠️ Continuing without package update...")
+        
+        # Install dependencies
+        self.install_essential_dependencies()
+        
+        # Setup storage
+        self.setup_storage()
+        
+        # Add bin to PATH
+        self.add_to_path()
+        
+        # Create quick scripts
+        self.create_quick_scripts()
+        
+        print("✅ Android environment setup completed!")
+        return True
+
+    def add_to_path(self):
+        """Add kali-tools/bin to PATH"""
+        bashrc = self.home_dir / ".bashrc"
+        zshrc = self.home_dir / ".zshrc"
+        
+        path_line = f'\nexport PATH="$HOME/kali-tools/bin:$PATH"\n'
+        
+        for rc_file in [bashrc, zshrc]:
+            if rc_file.exists():
+                with open(rc_file, 'a') as f:
+                    f.write(path_line)
+        
+        # Add to current session
+        os.environ["PATH"] = f"{self.bin_dir}:{os.environ['PATH']}"
+        print("✅ Added kali-tools/bin to PATH")
+
+    def show_android_specific_info(self):
+        """Show Android-specific information"""
+        print("\n📱 ANDROID-SPECIFIC FEATURES:")
+        print("=" * 50)
+        print("✅ Runs in Termux (no root required)")
+        print("✅ ARM-optimized packages")
+        print("✅ Access to Android APIs via termux-api")
+        print("✅ Mobile-optimized tools")
+        print("✅ Works on phones and tablets")
+        print("")
+        print("🔧 SPECIAL ANDROID TOOLS:")
+        print("• apktool - Reverse engineer APK files")
+        print("• jadx - Decompile Android apps") 
+        print("• adb - Android Debug Bridge")
+        print("• termux-api - Access phone features")
+        print("")
+        print("⚠️  LIMITATIONS:")
+        print("• Some wireless tools need compatible hardware")
+        print("• Raw socket access may be limited")
+        print("• Performance depends on device")
+        print("=" * 50)
+
+    def interactive_menu(self):
+        """Interactive installation menu"""
+        while True:
+            print("\n" + "=" * 60)
+            print("🛡️  KALI TOOLS ANDROID INSTALLER - TERMUX EDITION")
+            print("=" * 60)
+            print("1. Setup environment (run this first)")
+            print("2. Install popular tools")
+            print("3. Install specific tool")
+            print("4. Install tools by category") 
+            print("5. Install Android pentesting tools")
+            print("6. Verify tool installation")
+            print("7. Show usage examples")
+            print("8. Show Android-specific info")
+            print("9. Exit")
+            print("=" * 60)
+            
+            choice = input("🎯 Enter your choice (1-9): ").strip()
+            
+            if choice == '1':
+                self.setup_environment()
+            elif choice == '2':
+                self.install_popular_tools()
+            elif choice == '3':
+                tool_name = input("🔧 Enter tool name: ").strip()
+                self.install_tool(tool_name)
+            elif choice == '4':
+                print("\n📁 Available categories:")
+                for category in self.kali_tools.keys():
+                    print(f"  - {category}")
+                category = input("📁 Enter category name: ").strip()
+                self.install_category(category)
+            elif choice == '5':
+                self.install_android_tools()
+            elif choice == '6':
+                tool_name = input("🔍 Enter tool name to verify: ").strip()
+                self.verify_installation(tool_name)
+            elif choice == '7':
+                self.show_usage_examples()
+            elif choice == '8':
+                self.show_android_specific_info()
+            elif choice == '9':
+                print("👋 Goodbye! Restart Termux to use your tools!")
+                print("💡 Run: source ~/.bashrc")
+                break
+            else:
+                print("❌ Invalid choice")
+
+def main():
+    """Main function"""
+    print("🚀 KALI TOOLS ANDROID INSTALLER")
+    print("📱 Installing Kali tools on Android via Termux...")
+    
+    # Check architecture
+    arch = platform.machine()
+    print(f"📊 Architecture: {arch}")
+    
+    installer = KaliAndroidInstaller()
+    installer.interactive_menu()
+
+if __name__ == "__main__":
+    main()

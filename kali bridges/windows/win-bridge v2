@@ -1,0 +1,657 @@
+#!/usr/bin/env python3
+"""
+GENUINE KALI TOOLS WINDOWS INSTALLER
+Installs REAL Kali Linux tools on Windows using:
+- WSL2 with Kali Linux
+- Native Windows ports
+- Docker containers
+- Direct downloads
+"""
+
+import os
+import sys
+import platform
+import subprocess
+import shutil
+import urllib.request
+import tempfile
+import zipfile
+from pathlib import Path
+import ctypes
+import winreg
+
+class WindowsKaliInstaller:
+    def __init__(self):
+        self.system = "windows"
+        self.architecture = platform.machine().lower()
+        self.is_admin = self.check_admin()
+        self.kali_dir = Path.home() / "KaliTools"
+        self.bin_dir = self.kali_dir / "bin"
+        self.tools_dir = self.kali_dir / "tools"
+        self.wsl_dir = Path("C:\\kali-wsl")
+        
+        # GENUINE Kali tools with Windows installation methods
+        self.genuine_kali_tools = {
+            # Information Gathering - All have Windows versions
+            'nmap': {
+                'methods': ['native', 'wsl', 'choco'],
+                'native_url': 'https://nmap.org/dist/nmap-7.94-setup.exe',
+                'choco': 'nmap',
+                'description': 'Network exploration tool',
+                'test_cmd': 'nmap --version'
+            },
+            'masscan': {
+                'methods': ['native', 'choco'],
+                'native_url': 'https://github.com/robertdavidgraham/masscan/releases/download/1.3.2/masscan-1.3.2.exe',
+                'choco': 'masscan',
+                'description': 'Mass IP port scanner',
+                'test_cmd': 'masscan --version'
+            },
+            'theharvester': {
+                'methods': ['python', 'wsl'],
+                'pip': 'theharvester',
+                'description': 'OSINT gathering tool',
+                'test_cmd': 'theHarvester --help'
+            },
+            'sublist3r': {
+                'methods': ['python', 'wsl'],
+                'pip': 'sublist3r',
+                'description': 'Subdomain enumeration',
+                'test_cmd': 'sublist3r --help'
+            },
+            'amass': {
+                'methods': ['native', 'choco'],
+                'native_url': 'https://github.com/OWASP/Amass/releases/download/v4.0.0/amass_windows_amd64.zip',
+                'choco': 'amass',
+                'description': 'Attack surface mapping',
+                'test_cmd': 'amass --version'
+            },
+            'maltego': {
+                'methods': ['native'],
+                'native_url': 'https://download.maltego.com/maltego-v4.3.0/maltego-windows-4.3.0.exe',
+                'description': 'OSINT and forensics',
+                'test_cmd': 'Maltego'
+            },
+
+            # Vulnerability Analysis
+            'sqlmap': {
+                'methods': ['python', 'wsl'],
+                'pip': 'sqlmap',
+                'description': 'SQL injection tool',
+                'test_cmd': 'sqlmap --version'
+            },
+            'nikto': {
+                'methods': ['wsl', 'perl'],
+                'description': 'Web server scanner',
+                'test_cmd': 'nikto -Version'
+            },
+            'nuclei': {
+                'methods': ['native', 'choco'],
+                'native_url': 'https://github.com/projectdiscovery/nuclei/releases/download/v2.9.15/nuclei_2.9.15_windows_amd64.zip',
+                'choco': 'nuclei',
+                'description': 'Vulnerability scanner',
+                'test_cmd': 'nuclei -version'
+            },
+
+            # Web Application Tools
+            'burpsuite': {
+                'methods': ['native'],
+                'native_url': 'https://portswigger.net/burp/releases/download?product=community&version=2023.10.3&type=windowsx64',
+                'description': 'Web app security testing',
+                'test_cmd': 'burpsuite'
+            },
+            'dirb': {
+                'methods': ['wsl', 'native'],
+                'description': 'Web content scanner',
+                'test_cmd': 'dirb --help'
+            },
+            'gobuster': {
+                'methods': ['native', 'choco'],
+                'native_url': 'https://github.com/OJ/gobuster/releases/download/v3.6.0/gobuster_3.6.0_Windows_x64.zip',
+                'choco': 'gobuster',
+                'description': 'Directory/DNS busting',
+                'test_cmd': 'gobuster --help'
+            },
+            'wpscan': {
+                'methods': ['wsl', 'ruby'],
+                'description': 'WordPress security scanner',
+                'test_cmd': 'wpscan --version'
+            },
+
+            # Password Attacks
+            'hydra': {
+                'methods': ['native', 'wsl'],
+                'native_url': 'https://github.com/vanhauser-thc/thc-hydra/releases/download/v9.5/hydra-9.5-windows.zip',
+                'description': 'Network logon cracker',
+                'test_cmd': 'hydra --version'
+            },
+            'john': {
+                'methods': ['native', 'wsl'],
+                'native_url': 'https://github.com/openwall/john/archive/refs/heads/bleeding-jumbo.zip',
+                'description': 'John the Ripper',
+                'test_cmd': 'john --help'
+            },
+            'hashcat': {
+                'methods': ['native', 'choco'],
+                'native_url': 'https://github.com/hashcat/hashcat/releases/download/v6.2.6/hashcat-6.2.6.7z',
+                'choco': 'hashcat',
+                'description': 'Password recovery tool',
+                'test_cmd': 'hashcat --version'
+            },
+            'crunch': {
+                'methods': ['wsl'],
+                'description': 'Wordlist generator',
+                'test_cmd': 'crunch --help'
+            },
+
+            # Wireless Attacks
+            'aircrack-ng': {
+                'methods': ['native', 'wsl'],
+                'native_url': 'https://download.aircrack-ng.org/aircrack-ng-1.7-win.zip',
+                'description': 'WiFi security auditing',
+                'test_cmd': 'aircrack-ng --version'
+            },
+
+            # Sniffing & Spoofing
+            'wireshark': {
+                'methods': ['native', 'choco'],
+                'native_url': 'https://1.eu.dl.wireshark.org/win64/Wireshark-4.0.8-x64.exe',
+                'choco': 'wireshark',
+                'description': 'Network protocol analyzer',
+                'test_cmd': 'wireshark --version'
+            },
+            'nmap': {
+                'methods': ['native', 'wsl', 'choco'],
+                'native_url': 'https://nmap.org/dist/nmap-7.94-setup.exe',
+                'choco': 'nmap',
+                'description': 'Network scanner',
+                'test_cmd': 'nmap --version'
+            },
+
+            # Exploitation Tools
+            'metasploit': {
+                'methods': ['native', 'wsl'],
+                'native_url': 'https://windows.metasploit.com/metasploitframework-latest.msi',
+                'description': 'Penetration testing framework',
+                'test_cmd': 'msfconsole --version'
+            },
+
+            # Forensics
+            'binwalk': {
+                'methods': ['python', 'wsl'],
+                'pip': 'binwalk',
+                'description': 'Firmware analysis',
+                'test_cmd': 'binwalk --help'
+            },
+            'volatility': {
+                'methods': ['python', 'wsl'],
+                'pip': 'volatility3',
+                'description': 'Memory forensics',
+                'test_cmd': 'vol --help'
+            }
+        }
+
+        self.setup_directories()
+
+    def check_admin(self):
+        """Check if running as administrator"""
+        try:
+            return ctypes.windll.shell32.IsUserAnAdmin()
+        except:
+            return False
+
+    def setup_directories(self):
+        """Create Kali tools directory structure"""
+        directories = [self.kali_dir, self.bin_dir, self.tools_dir, self.kali_dir / "logs"]
+        for directory in directories:
+            directory.mkdir(parents=True, exist_ok=True)
+        print(f"📁 Kali tools directory: {self.kali_dir}")
+
+    def run_command(self, command, shell=True, check=True):
+        """Run system command with error handling"""
+        try:
+            result = subprocess.run(command, shell=shell, capture_output=True, text=True, check=check)
+            return True, result.stdout
+        except subprocess.CalledProcessError as e:
+            return False, e.stderr
+
+    def add_to_path(self, directory):
+        """Add directory to system PATH"""
+        try:
+            # Current user PATH
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ) as key:
+                try:
+                    current_path = winreg.QueryValueEx(key, "PATH")[0]
+                except FileNotFoundError:
+                    current_path = ""
+
+            if str(directory) not in current_path:
+                new_path = f"{current_path};{directory}" if current_path else str(directory)
+                
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_SET_VALUE) as key:
+                    winreg.SetValueEx(key, "PATH", 0, winreg.REG_EXPAND_SZ, new_path)
+                
+                print(f"✅ Added {directory} to PATH")
+                return True
+        except Exception as e:
+            print(f"❌ Failed to add to PATH: {e}")
+        return False
+
+    def install_chocolatey(self):
+        """Install Chocolatey package manager"""
+        if not shutil.which("choco"):
+            print("🍫 Installing Chocolatey...")
+            command = 'Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString("https://community.chocolatey.org/install.ps1"))'
+            success, output = self.run_command(command)
+            if success:
+                print("✅ Chocolatey installed successfully")
+                return True
+            else:
+                print("❌ Failed to install Chocolatey")
+                return False
+        return True
+
+    def install_wsl_kali(self):
+        """Install WSL2 with Kali Linux"""
+        if not self.is_admin:
+            print("❌ Administrator rights required for WSL installation")
+            return False
+
+        print("🐧 Installing WSL2 with Kali Linux...")
+        
+        # Enable WSL feature
+        commands = [
+            'dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart',
+            'dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart'
+        ]
+        
+        for cmd in commands:
+            success, output = self.run_command(cmd)
+            if not success:
+                print(f"❌ Failed to enable WSL: {cmd}")
+                return False
+        
+        # Download and set WSL2 as default
+        wsl_update_url = "https://wslstorestorage.blob.core.windows.net/wslblob/wsl_update_x64.msi"
+        wsl_update_path = self.tools_dir / "wsl_update.msi"
+        
+        print("📥 Downloading WSL2 kernel update...")
+        urllib.request.urlretrieve(wsl_update_url, wsl_update_path)
+        self.run_command(f'msiexec /i "{wsl_update_path}" /quiet')
+        
+        # Set WSL2 as default
+        self.run_command('wsl --set-default-version 2')
+        
+        # Install Kali Linux
+        print("📥 Installing Kali Linux...")
+        success, output = self.run_command('wsl --install -d kali-linux')
+        if success:
+            print("✅ Kali Linux installed in WSL2")
+            return True
+        else:
+            print("❌ Failed to install Kali Linux")
+            return False
+
+    def download_file(self, url, destination):
+        """Download file from URL"""
+        try:
+            print(f"📥 Downloading {url}...")
+            urllib.request.urlretrieve(url, destination)
+            return True
+        except Exception as e:
+            print(f"❌ Download failed: {e}")
+            return False
+
+    def extract_zip(self, zip_path, extract_to):
+        """Extract ZIP file"""
+        try:
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_to)
+            return True
+        except Exception as e:
+            print(f"❌ Extraction failed: {e}")
+            return False
+
+    def install_via_chocolatey(self, package_name):
+        """Install package via Chocolatey"""
+        try:
+            print(f"🍫 Installing {package_name} via Chocolatey...")
+            subprocess.run(["choco", "install", package_name, "-y", "--force"], check=True)
+            return True
+        except subprocess.CalledProcessError:
+            return False
+
+    def install_via_pip(self, package_name):
+        """Install Python package via pip"""
+        try:
+            print(f"🐍 Installing {package_name} via pip...")
+            subprocess.run([sys.executable, "-m", "pip", "install", package_name], check=True)
+            return True
+        except subprocess.CalledProcessError:
+            return False
+
+    def run_installer(self, installer_path, silent=True):
+        """Run Windows installer"""
+        try:
+            print(f"⚙️ Running installer: {installer_path}")
+            if silent:
+                subprocess.run([installer_path, "/S", "/quiet", "/norestart"], check=True)
+            else:
+                subprocess.run([installer_path], check=True)
+            return True
+        except subprocess.CalledProcessError:
+            return False
+
+    def install_native_tool(self, tool_name, tool_info):
+        """Install native Windows version of tool"""
+        if 'native_url' not in tool_info:
+            print(f"❌ No native download URL for {tool_name}")
+            return False
+        
+        print(f"🖥️ Installing native Windows version of {tool_name}...")
+        
+        # Download the tool
+        download_path = self.tools_dir / f"{tool_name}_setup"
+        if not self.download_file(tool_info['native_url'], download_path):
+            return False
+        
+        # Handle different file types
+        if download_path.suffix.lower() in ['.exe', '.msi']:
+            return self.run_installer(download_path)
+        elif download_path.suffix.lower() in ['.zip', '.7z']:
+            return self.handle_zip_installation(tool_name, download_path, tool_info)
+        else:
+            print(f"❌ Unsupported file type: {download_path.suffix}")
+            return False
+
+    def handle_zip_installation(self, tool_name, zip_path, tool_info):
+        """Handle ZIP file installation"""
+        tool_dir = self.tools_dir / tool_name
+        tool_dir.mkdir(exist_ok=True)
+        
+        if not self.extract_zip(zip_path, tool_dir):
+            return False
+        
+        # Look for executables and create batch wrappers
+        for file_path in tool_dir.rglob('*.exe'):
+            if file_path.is_file():
+                # Create batch wrapper
+                wrapper_content = f'@echo off\n"{file_path}" %*\n'
+                wrapper_file = self.bin_dir / f"{tool_name}.bat"
+                with open(wrapper_file, 'w') as f:
+                    f.write(wrapper_content)
+                print(f"✅ {tool_name} installed to {tool_dir}")
+                return True
+        
+        print(f"❌ No executable found for {tool_name}")
+        return False
+
+    def install_via_wsl(self, tool_name):
+        """Install tool via WSL Kali Linux"""
+        if not shutil.which("wsl"):
+            print("❌ WSL not installed")
+            return False
+        
+        print(f"🐧 Installing {tool_name} via WSL Kali Linux...")
+        command = f'wsl -d kali-linux -u root apt update && wsl -d kali-linux -u root apt install -y {tool_name}'
+        success, output = self.run_command(command)
+        
+        if success:
+            # Create Windows batch wrapper
+            wrapper_content = f'@echo off\nwsl -d kali-linux {tool_name} %*\n'
+            wrapper_file = self.bin_dir / f"{tool_name}.bat"
+            with open(wrapper_file, 'w') as f:
+                f.write(wrapper_content)
+            print(f"✅ {tool_name} installed via WSL")
+            return True
+        else:
+            print(f"❌ Failed to install {tool_name} via WSL")
+            return False
+
+    def install_tool(self, tool_name):
+        """Install a specific Kali tool using best available method"""
+        if tool_name not in self.genuine_kali_tools:
+            print(f"❌ Tool {tool_name} not found")
+            return False
+        
+        tool_info = self.genuine_kali_tools[tool_name]
+        print(f"\n🚀 Installing {tool_name}: {tool_info['description']}")
+        
+        # Try installation methods in order of preference
+        methods = tool_info['methods']
+        
+        for method in methods:
+            if method == 'native' and 'native_url' in tool_info:
+                if self.install_native_tool(tool_name, tool_info):
+                    return True
+            elif method == 'choco' and 'choco' in tool_info:
+                if self.install_via_chocolatey(tool_info['choco']):
+                    return True
+            elif method == 'python' and 'pip' in tool_info:
+                if self.install_via_pip(tool_info['pip']):
+                    return True
+            elif method == 'wsl':
+                if self.install_via_wsl(tool_name):
+                    return True
+        
+        print(f"❌ All installation methods failed for {tool_name}")
+        return False
+
+    def install_tool_category(self, category_name):
+        """Install all tools in a category"""
+        categories = {
+            'info_gathering': ['nmap', 'masscan', 'theharvester', 'sublist3r', 'amass', 'maltego'],
+            'vuln_analysis': ['sqlmap', 'nikto', 'nuclei'],
+            'web_apps': ['burpsuite', 'dirb', 'gobuster', 'wpscan'],
+            'password_attacks': ['hydra', 'john', 'hashcat', 'crunch'],
+            'wireless': ['aircrack-ng'],
+            'exploitation': ['metasploit'],
+            'forensics': ['binwalk', 'volatility']
+        }
+        
+        if category_name not in categories:
+            print(f"❌ Category {category_name} not found")
+            return False
+        
+        print(f"\n📦 Installing {category_name} tools...")
+        tools = categories[category_name]
+        success_count = 0
+        
+        for tool in tools:
+            if self.install_tool(tool):
+                success_count += 1
+        
+        print(f"✅ Installed {success_count}/{len(tools)} tools from {category_name}")
+        return success_count
+
+    def install_popular_tools(self):
+        """Install most popular Kali tools"""
+        popular_tools = ['nmap', 'sqlmap', 'wireshark', 'metasploit', 'burpsuite', 'aircrack-ng', 'hydra']
+        print("\n🎯 Installing popular Kali tools...")
+        
+        success_count = 0
+        for tool in popular_tools:
+            if self.install_tool(tool):
+                success_count += 1
+        
+        print(f"✅ Installed {success_count}/{len(popular_tools)} popular tools")
+        return success_count
+
+    def verify_installation(self, tool_name):
+        """Verify if tool is installed and working"""
+        if tool_name not in self.genuine_kali_tools:
+            print(f"❌ Tool {tool_name} not found")
+            return False
+        
+        tool_info = self.genuine_kali_tools[tool_name]
+        test_cmd = tool_info.get('test_cmd', f"{tool_name} --version")
+        
+        try:
+            subprocess.run(test_cmd.split(), capture_output=True, check=True)
+            print(f"✅ {tool_name} is installed and working!")
+            return True
+        except:
+            print(f"❌ {tool_name} is not working properly")
+            return False
+
+    def setup_environment(self):
+        """Setup the complete Windows environment"""
+        print("🛠️ Setting up Kali tools environment on Windows...")
+        
+        # Install Chocolatey
+        self.install_chocolatey()
+        
+        # Add bin directory to PATH
+        self.add_to_path(str(self.bin_dir))
+        
+        # Create batch scripts for easy access
+        self.create_batch_scripts()
+        
+        print("✅ Windows environment setup completed!")
+        return True
+
+    def setup_wsl_environment(self):
+        """Setup WSL with Kali Linux"""
+        print("🐧 Setting up WSL2 with Kali Linux...")
+        return self.install_wsl_kali()
+
+    def create_batch_scripts(self):
+        """Create batch scripts for common tasks"""
+        scripts = {
+            'kali-scan.bat': '''@echo off
+echo 🔍 Kali Network Scanner
+echo Running quick network discovery...
+nmap -sn 192.168.1.0/24
+pause
+''',
+            'kali-webscan.bat': '''@echo off
+echo 🌐 Kali Web Application Scanner
+if "%1"=="" (
+    echo Usage: kali-webscan target.com
+    pause
+    exit /b 1
+)
+echo Scanning: %1
+theHarvester -d %1 -b google
+sublist3r -d %1
+pause
+''',
+            'kali-wifi.bat': '''@echo off
+echo 📶 Kali WiFi Tools
+echo.
+echo Available tools:
+echo - aircrack-ng: WiFi security auditing
+echo - Requires compatible WiFi adapter
+echo.
+echo Usage examples:
+echo aircrack-ng -w wordlist.txt capture.cap
+pause
+'''
+        }
+        
+        for script_name, content in scripts.items():
+            script_path = self.bin_dir / script_name
+            with open(script_path, 'w') as f:
+                f.write(content)
+            print(f"📝 Created: {script_path}")
+
+    def show_usage_examples(self):
+        """Show Windows usage examples"""
+        examples = {
+            'nmap': 'nmap -sV 192.168.1.1',
+            'sqlmap': 'sqlmap -u "http://test.com/page?id=1" --batch',
+            'wireshark': 'wireshark (launches GUI)',
+            'metasploit': 'msfconsole',
+            'aircrack-ng': 'aircrack-ng -w wordlist.txt capture.cap',
+            'theharvester': 'theHarvester -d example.com -b google',
+            'burpsuite': 'burpsuite (launches GUI)'
+        }
+        
+        print("\n🎯 WINDOWS USAGE EXAMPLES:")
+        print("=" * 50)
+        for tool, example in examples.items():
+            print(f"🔧 {tool}:")
+            print(f"   {example}")
+        print("=" * 50)
+
+    def show_available_tools(self):
+        """Show all available Kali tools"""
+        print("\n🛠️ AVAILABLE GENUINE KALI TOOLS:")
+        print("=" * 60)
+        for tool, info in self.genuine_kali_tools.items():
+            methods = ", ".join(info['methods'])
+            print(f"🔧 {tool}: {info['description']}")
+            print(f"   📦 Methods: {methods}")
+        print("=" * 60)
+
+    def interactive_menu(self):
+        """Interactive installation menu"""
+        while True:
+            print("\n" + "=" * 60)
+            print("🛡️  GENUINE KALI TOOLS - WINDOWS INSTALLER")
+            print("=" * 60)
+            print("1. Setup Windows environment (RUN THIS FIRST)")
+            print("2. Setup WSL with Kali Linux (Recommended)")
+            print("3. Install specific Kali tool")
+            print("4. Install tools by category")
+            print("5. Install popular tools bundle")
+            print("6. Verify tool installation")
+            print("7. Show usage examples")
+            print("8. Show available tools")
+            print("9. Open Kali tools directory")
+            print("0. Exit")
+            print("=" * 60)
+            
+            choice = input("🎯 Enter your choice (0-9): ").strip()
+            
+            if choice == '1':
+                self.setup_environment()
+            elif choice == '2':
+                self.setup_wsl_environment()
+            elif choice == '3':
+                tool_name = input("🔧 Enter Kali tool name: ").strip()
+                self.install_tool(tool_name)
+            elif choice == '4':
+                print("\n📁 Available categories:")
+                print("  info_gathering - Network and OSINT tools")
+                print("  vuln_analysis - Vulnerability scanners")
+                print("  web_apps - Web application testing")
+                print("  password_attacks - Password cracking")
+                print("  wireless - WiFi security tools")
+                print("  exploitation - Penetration testing")
+                print("  forensics - Digital forensics")
+                category = input("📁 Enter category: ").strip()
+                self.install_tool_category(category)
+            elif choice == '5':
+                self.install_popular_tools()
+            elif choice == '6':
+                tool_name = input("🔍 Enter tool name to verify: ").strip()
+                self.verify_installation(tool_name)
+            elif choice == '7':
+                self.show_usage_examples()
+            elif choice == '8':
+                self.show_available_tools()
+            elif choice == '9':
+                os.startfile(self.kali_dir)
+            elif choice == '0':
+                print("👋 Goodbye! Open a NEW Command Prompt to use your Kali tools!")
+                break
+            else:
+                print("❌ Invalid choice")
+
+def main():
+    """Main function"""
+    print("🚀 GENUINE KALI LINUX TOOLS - WINDOWS INSTALLER")
+    print("🖥️ Installing REAL Kali tools on Windows...")
+    print("⚡ Uses native Windows ports, WSL2, and official packages!")
+    
+    # Check if Windows
+    if platform.system().lower() != 'windows':
+        print("❌ This installer is for Windows only!")
+        return
+    
+    installer = WindowsKaliInstaller()
+    installer.interactive_menu()
+
+if __name__ == "__main__":
+    main()

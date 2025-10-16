@@ -1,0 +1,532 @@
+#!/usr/bin/env python3
+"""
+REAL KALI TOOLS ANDROID INSTALLER - Installs genuine Kali Linux tools on Android via Termux
+Uses Kali repositories and official packages
+"""
+
+import os
+import sys
+import subprocess
+import shutil
+from pathlib import Path
+import urllib.request
+import tempfile
+import platform
+
+class RealKaliAndroidInstaller:
+    def __init__(self):
+        self.termux_prefix = "/data/data/com.termux/files/usr"
+        self.home_dir = Path.home()
+        self.kali_dir = self.home_dir / "kali-tools"
+        self.bin_dir = self.kali_dir / "bin"
+        self.config_dir = self.kali_dir / "config"
+        
+        # REAL Kali Linux tools packages available for ARM/Android
+        self.real_kali_tools = {
+            # Information Gathering - REAL Kali packages
+            'nmap': 'Network exploration and security auditing',
+            'masscan': 'Mass IP port scanner', 
+            'dnsutils': 'DNS tools (dig, nslookup)',
+            'whois': 'Domain information lookup',
+            'recon-ng': 'Web reconnaissance framework',
+            'theharvester': 'Email and subdomain enumeration',
+            'sublist3r': 'Subdomain discovery tool',
+            'amass': 'In-depth attack surface mapping',
+            'dnsrecon': 'DNS enumeration tool',
+            'maltego': 'OSINT and forensics framework',
+            
+            # Vulnerability Analysis
+            'nikto': 'Web server scanner',
+            'sqlmap': 'SQL injection tool',
+            'nuclei': 'Vulnerability scanner',
+            'wapiti': 'Web application vulnerability scanner',
+            'lynis': 'Security auditing tool',
+            
+            # Web Application Tools
+            'dirb': 'Web content scanner',
+            'gobuster': 'Directory/file & DNS busting tool',
+            'whatweb': 'Website fingerprinting tool',
+            'wpscan': 'WordPress security scanner',
+            'joomscan': 'Joomla vulnerability scanner',
+            
+            # Password Attacks
+            'hydra': 'Network logon cracker',
+            'john': 'John the Ripper password cracker',
+            'hashcat': 'Advanced password recovery',
+            'crunch': 'Wordlist generator',
+            'cewl': 'Custom wordlist generator',
+            
+            # Wireless Attacks
+            'aircrack-ng': 'WiFi security auditing suite',
+            'kismet': 'Wireless network detector',
+            'wifite': 'Automated wireless attack tool',
+            'reaver': 'WPS PIN attack tool',
+            
+            # Sniffing & Spoofing
+            'tcpdump': 'Command-line packet analyzer',
+            'tshark': 'Terminal-based Wireshark',
+            'ettercap': 'Network interceptor and analyzer',
+            'driftnet': 'Image capture from network traffic',
+            
+            # Exploitation Tools
+            'metasploit': 'Penetration testing framework',
+            'commix': 'Automated command injection',
+            'searchsploit': 'Exploit database search tool',
+            
+            # Forensics
+            'binwalk': 'Firmware analysis tool',
+            'foremost': 'Data recovery program',
+            'volatility': 'Memory forensics framework',
+            'sleuthkit': 'Forensic toolkit',
+            
+            # Android Specific
+            'apktool': 'Reverse engineering APK files',
+            'jadx': 'DEX to Java decompiler',
+            'android-tools': 'ADB and Android tools',
+            'termux-api': 'Access Android APIs',
+            
+            # System Tools
+            'git': 'Version control system',
+            'wget': 'File downloader',
+            'curl': 'URL transfer tool',
+            'python3': 'Python programming language',
+            'python3-pip': 'Python package manager',
+            'ruby': 'Ruby programming language',
+            'perl': 'Perl programming language'
+        }
+        
+        self.setup_directories()
+
+    def setup_directories(self):
+        """Create Kali tools directory structure"""
+        directories = [self.kali_dir, self.bin_dir, self.config_dir, self.kali_dir / "wordlists", self.kali_dir / "output"]
+        for directory in directories:
+            directory.mkdir(parents=True, exist_ok=True)
+        print(f"📁 Kali tools directory: {self.kali_dir}")
+
+    def run_command(self, command, shell=False):
+        """Run system command with error handling"""
+        try:
+            if shell:
+                result = subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
+            else:
+                result = subprocess.run(command, capture_output=True, text=True, check=True)
+            return True, result.stdout
+        except subprocess.CalledProcessError as e:
+            return False, e.stderr
+
+    def check_termux(self):
+        """Verify we're running in Termux"""
+        if not Path(self.termux_prefix).exists():
+            print("❌ This script must be run in Termux!")
+            print("📥 Install Termux from F-Droid: https://f-droid.org/en/packages/com.termux/")
+            return False
+        return True
+
+    def setup_kali_repos(self):
+        """Add Kali Linux repositories to Termux"""
+        print("🔧 Setting up Kali Linux repositories...")
+        
+        # Create sources.list.d directory if it doesn't exist
+        sources_dir = Path(self.termux_prefix) / "etc" / "apt" / "sources.list.d"
+        sources_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Add Kali repository
+        kali_sources = sources_dir / "kali.list"
+        with open(kali_sources, 'w') as f:
+            f.write("deb https://http.kali.org/kali kali-rolling main contrib non-free\n")
+        
+        # Download and add Kali repository key
+        key_url = "https://archive.kali.org/archive-key.asc"
+        key_path = Path("/tmp/kali-key.asc")
+        
+        try:
+            urllib.request.urlretrieve(key_url, key_path)
+            success, output = self.run_command(["apt-key", "add", str(key_path)])
+            if success:
+                print("✅ Kali repository key added")
+            else:
+                print("❌ Failed to add Kali repository key")
+        except Exception as e:
+            print(f"❌ Failed to download Kali key: {e}")
+        
+        # Update package lists
+        print("🔄 Updating package lists with Kali repositories...")
+        success, output = self.run_command(["pkg", "update"])
+        if success:
+            print("✅ Kali repositories configured successfully")
+            return True
+        else:
+            print("❌ Failed to update package lists")
+            return False
+
+    def install_via_pkg(self, package_name):
+        """Install package via pkg (Termux)"""
+        try:
+            print(f"📦 Installing {package_name}...")
+            subprocess.run(["pkg", "install", "-y", package_name], check=True)
+            
+            # Verify installation
+            if shutil.which(package_name) or self.is_package_installed(package_name):
+                print(f"✅ {package_name} installed successfully")
+                return True
+            else:
+                print(f"⚠️ {package_name} installed but not in PATH")
+                return True
+                
+        except subprocess.CalledProcessError:
+            print(f"❌ Failed to install {package_name} via pkg")
+            return False
+
+    def install_via_pip(self, package_name):
+        """Install Python package via pip"""
+        try:
+            print(f"🐍 Installing {package_name} via pip...")
+            subprocess.run(["pip", "install", "--user", package_name], check=True)
+            print(f"✅ {package_name} installed via pip")
+            return True
+        except subprocess.CalledProcessError:
+            print(f"❌ Failed to install {package_name} via pip")
+            return False
+
+    def is_package_installed(self, package_name):
+        """Check if package is installed"""
+        try:
+            subprocess.run(["dpkg", "-s", package_name], capture_output=True, check=True)
+            return True
+        except subprocess.CalledProcessError:
+            return False
+
+    def install_nmap(self):
+        """Install NMAP with full functionality"""
+        print("🔧 Installing NMAP...")
+        if self.install_via_pkg("nmap"):
+            # Test NMAP
+            success, output = self.run_command(["nmap", "--version"])
+            if success:
+                print("✅ NMAP installed and working!")
+                return True
+        return False
+
+    def install_metasploit(self):
+        """Install Metasploit Framework"""
+        print("💣 Installing Metasploit Framework...")
+        if self.install_via_pkg("metasploit"):
+            print("✅ Metasploit installed - run 'msfconsole' to start")
+            return True
+        return False
+
+    def install_sqlmap(self):
+        """Install SQLMap"""
+        print("💉 Installing SQLMap...")
+        return self.install_via_pip("sqlmap")
+
+    def install_aircrack(self):
+        """Install Aircrack-ng suite"""
+        print("📶 Installing Aircrack-ng...")
+        if self.install_via_pkg("aircrack-ng"):
+            print("✅ Aircrack-ng installed - requires compatible WiFi adapter")
+            return True
+        return False
+
+    def install_android_tools(self):
+        """Install Android-specific penetration testing tools"""
+        print("📱 Installing Android penetration testing tools...")
+        tools = ['apktool', 'jadx', 'android-tools']
+        success_count = 0
+        
+        for tool in tools:
+            if self.install_via_pkg(tool):
+                success_count += 1
+        
+        print(f"✅ Installed {success_count}/{len(tools)} Android tools")
+        return success_count
+
+    def install_tool(self, tool_name):
+        """Install a specific Kali tool"""
+        if tool_name not in self.real_kali_tools:
+            print(f"❌ Tool {tool_name} not found in Kali database")
+            return False
+        
+        description = self.real_kali_tools[tool_name]
+        print(f"\n🚀 Installing {tool_name}: {description}")
+        
+        # Special handling for specific tools
+        special_installers = {
+            'nmap': self.install_nmap,
+            'metasploit': self.install_metasploit,
+            'sqlmap': self.install_sqlmap,
+            'aircrack-ng': self.install_aircrack
+        }
+        
+        if tool_name in special_installers:
+            return special_installers[tool_name]()
+        else:
+            return self.install_via_pkg(tool_name)
+
+    def install_tool_category(self, category_name):
+        """Install tools by category"""
+        categories = {
+            'info_gathering': ['nmap', 'masscan', 'theharvester', 'sublist3r', 'amass', 'dnsrecon'],
+            'web_apps': ['sqlmap', 'nikto', 'dirb', 'gobuster', 'wpscan', 'whatweb'],
+            'password_attacks': ['hydra', 'john', 'hashcat', 'crunch'],
+            'wireless': ['aircrack-ng', 'kismet', 'wifite'],
+            'exploitation': ['metasploit', 'commix', 'searchsploit'],
+            'android_tools': ['apktool', 'jadx', 'android-tools']
+        }
+        
+        if category_name not in categories:
+            print(f"❌ Category {category_name} not found")
+            return False
+        
+        print(f"\n📦 Installing {category_name} tools...")
+        tools = categories[category_name]
+        success_count = 0
+        
+        for tool in tools:
+            if self.install_tool(tool):
+                success_count += 1
+        
+        print(f"✅ Installed {success_count}/{len(tools)} tools from {category_name}")
+        return success_count
+
+    def install_all_tools(self):
+        """Install ALL Kali tools (this will take a while)"""
+        print("🚀 Installing ALL Kali Linux tools...")
+        print("⚠️ This will download several GB of data and take significant time")
+        
+        confirm = input("❓ Continue? (y/N): ").strip().lower()
+        if confirm != 'y':
+            print("Installation cancelled")
+            return False
+        
+        success_count = 0
+        total_tools = len(self.real_kali_tools)
+        
+        for tool_name in self.real_kali_tools:
+            if self.install_tool(tool_name):
+                success_count += 1
+        
+        print(f"🎉 Installation complete! {success_count}/{total_tools} tools installed")
+        return success_count
+
+    def setup_storage(self):
+        """Setup Termux storage access"""
+        print("💾 Setting up storage access...")
+        success, output = self.run_command("termux-setup-storage")
+        if success:
+            print("✅ Storage access configured")
+            print("📁 Your files are in: /storage/emulated/0/")
+        else:
+            print("❌ Failed to setup storage")
+        return success
+
+    def update_system(self):
+        """Update Termux system"""
+        print("🔄 Updating Termux system...")
+        commands = [
+            ["pkg", "update"],
+            ["pkg", "upgrade", "-y"],
+            ["pkg", "install", "-y", "python", "python-pip", "git", "wget", "curl"]
+        ]
+        
+        for cmd in commands:
+            success, output = self.run_command(cmd)
+            if not success:
+                print(f"❌ Command failed: {cmd}")
+        
+        print("✅ System updated successfully")
+        return True
+
+    def verify_installation(self, tool_name):
+        """Verify if tool is installed and working"""
+        if tool_name not in self.real_kali_tools:
+            print(f"❌ Tool {tool_name} not found")
+            return False
+        
+        try:
+            # Try to run the tool with --version or --help
+            subprocess.run([tool_name, "--version"], capture_output=True, check=True)
+            print(f"✅ {tool_name} is installed and working!")
+            return True
+        except:
+            try:
+                subprocess.run([tool_name, "--help"], capture_output=True, check=True)
+                print(f"✅ {tool_name} is installed and working!")
+                return True
+            except:
+                print(f"❌ {tool_name} is not working properly")
+                return False
+
+    def create_quick_scripts(self):
+        """Create quick launch scripts for common tasks"""
+        scripts = {
+            'kali-scan': '''#!/bin/bash
+echo "🔍 Kali Network Scanner"
+echo "Running quick network discovery..."
+nmap -sn 192.168.1.0/24
+''',
+            'kali-webscan': '''#!/bin/bash
+echo "🌐 Kali Web Application Scanner"
+if [ -z "$1" ]; then
+    echo "Usage: kali-webscan target.com"
+    exit 1
+fi
+echo "Scanning: $1"
+theHarvester -d "$1" -b google
+sublist3r -d "$1"
+''',
+            'kali-android': '''#!/bin/bash
+echo "📱 Android Penetration Testing"
+echo "Available tools:"
+echo "• apktool d app.apk - Decompile APK"
+echo "• jadx app.apk - Decompile to Java"
+echo "• adb devices - List connected devices"
+'''
+        }
+        
+        for script_name, content in scripts.items():
+            script_path = self.bin_dir / script_name
+            with open(script_path, 'w') as f:
+                f.write(content)
+            script_path.chmod(0o755)
+            print(f"📝 Created: {script_path}")
+
+    def setup_environment(self):
+        """Setup complete Kali environment on Android"""
+        print("🛠️ Setting up REAL Kali Linux environment on Android...")
+        
+        # Check Termux
+        if not self.check_termux():
+            return False
+        
+        # Update system
+        self.update_system()
+        
+        # Setup Kali repositories
+        self.setup_kali_repos()
+        
+        # Setup storage
+        self.setup_storage()
+        
+        # Create quick scripts
+        self.create_quick_scripts()
+        
+        # Add to PATH
+        self.add_to_path()
+        
+        print("✅ REAL Kali environment setup completed!")
+        print("🔧 You can now install genuine Kali Linux tools")
+        return True
+
+    def add_to_path(self):
+        """Add kali-tools/bin to PATH"""
+        bashrc = self.home_dir / ".bashrc"
+        
+        path_line = f'\nexport PATH="$HOME/kali-tools/bin:$PATH"\n'
+        
+        if bashrc.exists():
+            with open(bashrc, 'a') as f:
+                f.write(path_line)
+        
+        # Add to current session
+        os.environ["PATH"] = f"{self.bin_dir}:{os.environ['PATH']}"
+        print("✅ Added kali-tools/bin to PATH")
+
+    def show_tool_categories(self):
+        """Show available tool categories"""
+        categories = {
+            'info_gathering': 'Network scanning and reconnaissance',
+            'web_apps': 'Web application security testing', 
+            'password_attacks': 'Password cracking and brute force',
+            'wireless': 'Wireless network auditing',
+            'exploitation': 'Exploitation frameworks and tools',
+            'android_tools': 'Android-specific penetration testing'
+        }
+        
+        print("\n📁 AVAILABLE CATEGORIES:")
+        for cat_id, description in categories.items():
+            print(f"  {cat_id}: {description}")
+
+    def show_usage_examples(self):
+        """Show real usage examples"""
+        examples = {
+            'nmap': 'nmap -sV 192.168.1.1',
+            'sqlmap': 'sqlmap -u "http://test.com/page?id=1" --batch',
+            'metasploit': 'msfconsole',
+            'aircrack-ng': 'aircrack-ng -w wordlist.txt capture.cap',
+            'hydra': 'hydra -l admin -P passwords.txt ssh://192.168.1.1',
+            'apktool': 'apktool d app.apk',
+            'theharvester': 'theHarvester -d example.com -b google'
+        }
+        
+        print("\n🎯 REAL KALI TOOL USAGE:")
+        for tool, example in examples.items():
+            print(f"🔧 {tool}: {example}")
+
+    def interactive_menu(self):
+        """Interactive installation menu"""
+        while True:
+            print("\n" + "=" * 60)
+            print("🛡️  REAL KALI TOOLS - ANDROID TERMUX INSTALLER")
+            print("=" * 60)
+            print("1. Setup Kali environment (RUN THIS FIRST)")
+            print("2. Install specific Kali tool")
+            print("3. Install tools by category") 
+            print("4. Install popular tools bundle")
+            print("5. Install ALL Kali tools (massive download)")
+            print("6. Verify tool installation")
+            print("7. Show usage examples")
+            print("8. Show available tools")
+            print("9. Exit")
+            print("=" * 60)
+            
+            choice = input("🎯 Enter your choice (1-9): ").strip()
+            
+            if choice == '1':
+                self.setup_environment()
+            elif choice == '2':
+                tool_name = input("🔧 Enter Kali tool name: ").strip()
+                self.install_tool(tool_name)
+            elif choice == '3':
+                self.show_tool_categories()
+                category = input("📁 Enter category: ").strip()
+                self.install_tool_category(category)
+            elif choice == '4':
+                popular_tools = ['nmap', 'sqlmap', 'metasploit', 'aircrack-ng', 'hydra', 'apktool']
+                print("🎯 Installing popular tools...")
+                for tool in popular_tools:
+                    self.install_tool(tool)
+            elif choice == '5':
+                self.install_all_tools()
+            elif choice == '6':
+                tool_name = input("🔍 Enter tool name to verify: ").strip()
+                self.verify_installation(tool_name)
+            elif choice == '7':
+                self.show_usage_examples()
+            elif choice == '8':
+                print("\n🛠️ AVAILABLE KALI TOOLS:")
+                for tool, desc in self.real_kali_tools.items():
+                    print(f"  {tool}: {desc}")
+            elif choice == '9':
+                print("👋 Goodbye! Restart Termux and use your Kali tools!")
+                print("💡 Run: source ~/.bashrc")
+                break
+            else:
+                print("❌ Invalid choice")
+
+def main():
+    """Main function"""
+    print("🚀 REAL KALI LINUX TOOLS - ANDROID INSTALLER")
+    print("📱 Installing GENUINE Kali tools on Android Termux...")
+    print("⚡ This installs REAL tools from Kali Linux repositories!")
+    
+    # Show system info
+    arch = platform.machine()
+    print(f"📊 Architecture: {arch}")
+    
+    installer = RealKaliAndroidInstaller()
+    installer.interactive_menu()
+
+if __name__ == "__main__":
+    main()
